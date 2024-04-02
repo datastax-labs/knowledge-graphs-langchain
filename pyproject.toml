@@ -8,7 +8,17 @@ packages = [{include = "knowledge_graph"}]
 
 [tool.poetry.dependencies]
 python = "^3.11"
+langchain = "^0.1.14"
+langchain-community = "^0.0.31"
+langchain-openai = "^0.1.1"
+langchain-experimental = "^0.0.56"
+cassio = "^0.1.5"
 
+
+[tool.poetry.group.dev.dependencies]
+python-dotenv = "^1.0.1"
+ipykernel = "^6.29.4"
+ruff = "^0.3.5"
 
 [build-system]
 requires = ["poetry-core"]
