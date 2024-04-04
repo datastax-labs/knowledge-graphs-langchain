@@ -1,19 +1,32 @@
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Iterator
 from langchain_community.graphs.graph_store import GraphStore
 from langchain_community.graphs.graph_document import GraphDocument
 
 from langchain_core.runnables import Runnable, RunnableLambda
 
 from cassandra.cluster import Session
-from cassandra.query import BatchStatement
+from cassandra.query import BatchStatement, PreparedStatement
 import cassio
 from cassio.config import check_resolve_session, check_resolve_keyspace
 
-QUERY_RELATIONSHIPS: str = """
-    SELECT source, target, type
-    FROM relationships
-    WHERE source = %(node)s
-"""
+try:
+    # Try importing the function from itertools (Python 3.12+)
+    from itertools import batched
+except ImportError:
+    from itertools import islice
+    from typing import Iterable, TypeVar
+
+    # Fallback implementation for older Python versions
+
+    T = TypeVar("T")
+
+    # This is equivalent to `itertools.batched`, but that is only available in 3.12
+    def batched(iterable: Iterable[T], n: int) -> Iterator[Iterator[T]]:
+        if n < 1:
+            raise ValueError('n must be at least one')
+        it = iter(iterable)
+        while batch := tuple(islice(it, n)):
+            yield batch
 
 def graph_retriever(query: str | Sequence[str],
                     session: Session,
@@ -35,15 +48,18 @@ def graph_retriever(query: str | Sequence[str],
 
         discovered = set()
         # TODO: Make async?
-        for node in pending:
-            relations = session.execute(
-                QUERY_RELATIONSHIPS, {"node": node}
-            )
-            relations = list(relations)
+        for nodes in batched(pending, 50):
+            nodes = ", ".join([f"'{node}'" for node in nodes])
+            query = f"SELECT source, target, type FROM relationships WHERE source IN ({nodes})"
 
-            results.update(relations)
+            relations = session.execute(query)
 
-            discovered.update(map(lambda r: r.target, relations))
+            # Can't do this yet -- the `nodes` list isn't valid in this context (only valid in vector or list).
+            # relations = session.execute("SELECT source, target, type FROM relationships WHERE source IN (%(nodes)s)", {"nodes": nodes})
+
+            for relation in relations:
+                results.add(relation)
+                discovered.add(relation.target)
 
         visited.update(pending)
         pending = discovered.difference(visited)
@@ -73,16 +89,8 @@ class CassandraGraphStore(GraphStore):
                 source TEXT,
                 target TEXT,
                 type TEXT,
-                PRIMARY KEY ((source, target), type)
+                PRIMARY KEY (source, target, type)
             );
-            """
-        )
-
-        self._session.execute(
-            """
-            CREATE CUSTOM INDEX IF NOT EXISTS relationships_source_idx
-            ON relationships (source)
-            USING 'StorageAttachedIndex';
             """
         )
 
@@ -97,20 +105,26 @@ class CassandraGraphStore(GraphStore):
     def add_graph_documents(
         self, graph_documents: List[GraphDocument], include_source: bool = False
     ) -> None:
-        batch = BatchStatement()
+        insertions = self._insertions(graph_documents, include_source)
+
+        for batch in batched(insertions, n=50):
+            batch_statement = BatchStatement()
+            for (statement, args) in batch:
+                batch_statement.add(statement, args)
+            self._session.execute(batch_statement)
+
+    def _insertions(self, graph_documents: List[GraphDocument], include_source: bool = False
+    ) -> Iterator[Tuple[PreparedStatement, Any]]:
         for graph_document in graph_documents:
             # TODO: if `include_source = True`, include entry connecting the
             # nodes we add to the `graph_document.source`.
             for node in graph_document.nodes:
-                batch.add(self._insert_node, (node.id, node.type))
+                yield (self._insert_node, (node.id, node.type))
             for edge in graph_document.relationships:
-                batch.add(
+                yield (
                     self._insert_relationship,
                     (edge.source.id, edge.target.id, edge.type),
                 )
-
-        # TODO: Do we need to roll the batch if it gets too large?
-        self._session.execute(batch)
 
     # TODO: should this include the types of each node?
     def query(self, query: str, params: dict = {}) -> List[Dict[str, Any]]:
