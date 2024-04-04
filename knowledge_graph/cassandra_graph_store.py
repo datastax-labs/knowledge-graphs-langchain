@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Iterator
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Iterator, NamedTuple
 from langchain_community.graphs.graph_store import GraphStore
 from langchain_community.graphs.graph_document import GraphDocument
 
@@ -28,17 +28,58 @@ except ImportError:
         while batch := tuple(islice(it, n)):
             yield batch
 
-def graph_retriever(query: str | Sequence[str],
-                    session: Session,
-                    steps: int = 3) -> Sequence[str]:
+class Relation(NamedTuple):
+    source: str
+    target: str
+    type: str
+
+    def __repr__(self):
+        return f"{self.source} -> {self.target}: {self.type}"
+
+def traverse(
+    start: str | Sequence[str],
+    edge_table: str,
+    edge_source: str = "source",
+    edge_target: str = "target",
+    edge_type: str = "type",
+    edge_filter: Dict[str, Any] = {},
+    steps: int = 3,
+    session: Optional[Session] = None,
+    keyspace: Optional[str] = None,
+) -> Iterable[Relation]:
+    """
+    Traverse the graph from the given starting nodes.
+
+    Parameters:
+    - start: The starting node or nodes.
+    - edge_table: The table containing the edges.
+    - edge_source: The name of the column containing edge sources.
+    - edge_target: The name of the column containing edge targets.
+    - edge_type: The name of the column containing edge types.
+    - edge_filter: Filters to apply to the edges being traversed.
+      Currently, this is specified as a dictionary containing the name
+      of the edge field to filter on and the CQL predicate to apply.
+      For example `{"foo": "IN ['a', 'b', 'c']"}`.
+    - steps: The number of steps of edges to follow from a start node.
+    - session: The session to use for executing the query. If not specified,
+      it will use th default cassio session.
+    - keyspace: The keyspace to use for the query. If not specified, it will
+      use the default cassio keyspace.
+
+    Returns:
+    An iterable containing all relations visited by the traversal.
+    """
+    session = check_resolve_session(session)
+    keyspace = check_resolve_keyspace(keyspace)
+
     # TODO: Entity extraction from query
     visited = set()
     pending = set()
 
-    if isinstance(query, str):
-        pending.update([query])
+    if isinstance(start, str):
+        pending.update([start])
     else:
-        pending.update(query)
+        pending.update(start)
 
     results = set()
 
@@ -47,10 +88,18 @@ def graph_retriever(query: str | Sequence[str],
             break
 
         discovered = set()
-        # TODO: Make async?
-        for nodes in batched(pending, 50):
+
+        for nodes in batched(pending, 20):
             nodes = ", ".join([f"'{node}'" for node in nodes])
-            query = f"SELECT source, target, type FROM relationships WHERE source IN ({nodes})"
+
+            predicates = [f"{edge_source} IN ({nodes})"]
+            predicates.extend([f"{field} {predicate}" for field, predicate in edge_filter.items()])
+
+            query = f"""
+                SELECT {edge_source} AS source, {edge_target} AS target, {edge_type} AS type
+                FROM {edge_table}
+                WHERE {" AND ".join(predicates)}
+            """
 
             relations = session.execute(query)
 
@@ -58,19 +107,55 @@ def graph_retriever(query: str | Sequence[str],
             # relations = session.execute("SELECT source, target, type FROM relationships WHERE source IN (%(nodes)s)", {"nodes": nodes})
 
             for relation in relations:
-                results.add(relation)
+                results.add(Relation(source=relation.source, target=relation.target, type=relation.type))
                 discovered.add(relation.target)
 
         visited.update(pending)
         pending = discovered.difference(visited)
 
-    return [f"{r.source} -> {r.target}: {r.type}" for r in results]
+    return results
+
+async def atraverse(
+    start: str | Sequence[str],
+    edge_table: str,
+    edge_source: str = "source",
+    edge_target: str = "target",
+    edge_type: str = "type",
+    edge_filter: Dict[str, Any] = {},
+    steps: int = 3,
+    session: Optional[Session] = None,
+    keyspace: Optional[str] = None,
+) -> Iterable[Relation]:
+    """
+    Async traversal of the graph from the given starting nodes.
+
+    Parameters:
+    - start: The starting node or nodes.
+    - edge_table: The table containing the edges.
+    - edge_source: The name of the column containing edge sources.
+    - edge_target: The name of the column containing edge targets.
+    - edge_type: The name of the column containing edge types.
+    - edge_filter: Filters to apply to the edges being traversed.
+      Currently, this is specified as a dictionary containing the name
+      of the edge field to filter on and the CQL predicate to apply.
+      For example `{"foo": "IN ['a', 'b', 'c']"}`.
+    - steps: The number of steps of edges to follow from a start node.
+    - session: The session to use for executing the query. If not specified,
+      it will use th default cassio session.
+    - keyspace: The keyspace to use for the query. If not specified, it will
+      use the default cassio keyspace.
+
+    Returns:
+    An iterable containing all relations visited by the traversal.
+    """
+    pass
 
 class CassandraGraphStore(GraphStore):
     def __init__(self, keyspace: Optional[str] = None) -> None:
         cassio.init(auto=True)
         self._session = check_resolve_session()
         keyspace = keyspace or check_resolve_keyspace()
+        self._keyspace = keyspace
 
         self._session.set_keyspace(keyspace)
         self._session.execute(
@@ -142,7 +227,9 @@ class CassandraGraphStore(GraphStore):
         - llm: The language model to use for extracting entities from the query.
         - steps: The maximum distance to follow from the starting points.
         """
-        return RunnableLambda(graph_retriever).bind(
+        return RunnableLambda(func=traverse).bind(
+            edge_table="relationships",
+            steps = steps,
             session = self._session,
-            steps = steps
+            keyspace = self._keyspace,
         )
