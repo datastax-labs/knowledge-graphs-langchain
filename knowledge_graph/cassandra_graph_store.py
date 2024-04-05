@@ -24,10 +24,11 @@ except ImportError:
     # This is equivalent to `itertools.batched`, but that is only available in 3.12
     def batched(iterable: Iterable[T], n: int) -> Iterator[Iterator[T]]:
         if n < 1:
-            raise ValueError('n must be at least one')
+            raise ValueError("n must be at least one")
         it = iter(iterable)
         while batch := tuple(islice(it, n)):
             yield batch
+
 
 class Relation(NamedTuple):
     source: str
@@ -36,6 +37,7 @@ class Relation(NamedTuple):
 
     def __repr__(self):
         return f"{self.source} -> {self.target}: {self.type}"
+
 
 def _query_string(
     sources: Sequence[str],
@@ -62,7 +64,9 @@ def _query_string(
         lines.extend(map(lambda predicate: f"AND {predicate}"))
     return " ".join(lines)
 
+
 DEFAULT_MAX_ELEMENTS_PER_BATCH = 50
+
 
 def traverse(
     start: str | Sequence[str],
@@ -121,11 +125,18 @@ def traverse(
                 edge_source=edge_source,
                 edge_target=edge_target,
                 edge_type=edge_type,
-                predicates=edge_filters)
+                predicates=edge_filters,
+            )
             relations = session.execute(query)
 
             for relation in relations:
-                results.add(Relation(source=relation.source, target=relation.target, type=relation.type))
+                results.add(
+                    Relation(
+                        source=relation.source,
+                        target=relation.target,
+                        type=relation.type,
+                    )
+                )
                 discovered.add(relation.target)
 
         visited.update(pending)
@@ -133,10 +144,9 @@ def traverse(
 
     return results
 
+
 class AsyncPagedQuery(object):
-    def __init__(self,
-                 depth: int,
-                 response_future: ResponseFuture):
+    def __init__(self, depth: int, response_future: ResponseFuture):
         self.loop = asyncio.get_running_loop()
         self.depth = depth
         self.response_future = response_future
@@ -159,6 +169,7 @@ class AsyncPagedQuery(object):
         else:
             return (self.depth, page, None)
 
+
 async def atraverse(
     start: str | Sequence[str],
     edge_table: str,
@@ -169,7 +180,7 @@ async def atraverse(
     steps: int = 3,
     session: Optional[Session] = None,
     keyspace: Optional[str] = None,
-    max_elements_per_batch: int = DEFAULT_MAX_ELEMENTS_PER_BATCH
+    max_elements_per_batch: int = DEFAULT_MAX_ELEMENTS_PER_BATCH,
 ) -> Iterable[Relation]:
     """
     Async traversal of the graph from the given starting nodes.
@@ -204,7 +215,8 @@ async def atraverse(
             edge_source=edge_source,
             edge_target=edge_target,
             edge_type=edge_type,
-            predicates=edge_filters)
+            predicates=edge_filters,
+        )
 
         return AsyncPagedQuery(depth, session.execute_async(query))
 
@@ -217,7 +229,9 @@ async def atraverse(
         pending = [tg.create_task(fetch_relations(1, start).next())]
 
         while pending:
-            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            done, pending = await asyncio.wait(
+                pending, return_when=asyncio.FIRST_COMPLETED
+            )
             for future in done:
                 depth, relations, more = future.result()
                 for relation in relations:
@@ -241,9 +255,14 @@ async def atraverse(
                             to_visit.add(r.target)
 
                     for target_batch in batched(to_visit, max_elements_per_batch):
-                        pending.add(tg.create_task(fetch_relations(depth + 1, target_batch).next()))
+                        pending.add(
+                            tg.create_task(
+                                fetch_relations(depth + 1, target_batch).next()
+                            )
+                        )
 
     return results
+
 
 class CassandraGraphStore(GraphStore):
     def __init__(self, keyspace: Optional[str] = None) -> None:
@@ -289,11 +308,12 @@ class CassandraGraphStore(GraphStore):
 
         for batch in batched(insertions, n=50):
             batch_statement = BatchStatement()
-            for (statement, args) in batch:
+            for statement, args in batch:
                 batch_statement.add(statement, args)
             self._session.execute(batch_statement)
 
-    def _insertions(self, graph_documents: List[GraphDocument], include_source: bool = False
+    def _insertions(
+        self, graph_documents: List[GraphDocument], include_source: bool = False
     ) -> Iterator[Tuple[PreparedStatement, Any]]:
         for graph_document in graph_documents:
             # TODO: if `include_source = True`, include entry connecting the
@@ -310,11 +330,9 @@ class CassandraGraphStore(GraphStore):
     def query(self, query: str, params: dict = {}) -> List[Dict[str, Any]]:
         steps = params.get("steps", 3)
 
-        return self.as_runnable(steps = steps).invoke(query)
+        return self.as_runnable(steps=steps).invoke(query)
 
-    def as_runnable(
-        self, steps: int = 3
-    ) -> Runnable:
+    def as_runnable(self, steps: int = 3) -> Runnable:
         """
         Return a retriever that queries this graph store.
 
@@ -324,7 +342,7 @@ class CassandraGraphStore(GraphStore):
         """
         return RunnableLambda(func=traverse, afunc=atraverse).bind(
             edge_table="relationships",
-            steps = steps,
-            session = self._session,
-            keyspace = self._keyspace,
+            steps=steps,
+            session=self._session,
+            keyspace=self._keyspace,
         )
