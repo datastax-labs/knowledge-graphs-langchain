@@ -1,3 +1,5 @@
+from functools import lru_cache
+from itertools import repeat
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Iterator, NamedTuple
 from langchain_community.graphs.graph_store import GraphStore
 from langchain_community.graphs.graph_document import GraphDocument
@@ -36,13 +38,40 @@ class Relation(NamedTuple):
     def __repr__(self):
         return f"{self.source} -> {self.target}: {self.type}"
 
+@lru_cache()
+def _query_string(
+    n_sources: int,
+    edge_table: str,
+    edge_source: str,
+    edge_target: str,
+    edge_type: str,
+    predicates: Sequence[str],
+) -> str:
+    """Return the query string for the given number of sources.
+
+    Ideally, this would be something like `source IN %s` and we wouldn't need to
+    expand it for each length, but currently that produces an error since it
+    doesn't want to accept a list in that context. Instead, we need to unroll it
+    to `source IN (%s, %s, ...)` for the number of arguments.
+    """
+    sources = ", ".join(repeat("%s", n_sources))
+    lines = [
+        f"SELECT {edge_source} AS source, {edge_target} AS target, {edge_type} AS type",
+        f"FROM {edge_table}",
+        f"WHERE {edge_source} IN ({sources})",
+    ]
+    if predicates:
+        lines.extend(map(lambda predicate: f"AND {predicate}"))
+    return " ".join(lines)
+
+
 def traverse(
     start: str | Sequence[str],
     edge_table: str,
     edge_source: str = "source",
     edge_target: str = "target",
     edge_type: str = "type",
-    edge_filter: Dict[str, Any] = {},
+    edge_filters: Sequence[str] = (),
     steps: int = 3,
     session: Optional[Session] = None,
     keyspace: Optional[str] = None,
@@ -56,10 +85,7 @@ def traverse(
     - edge_source: The name of the column containing edge sources.
     - edge_target: The name of the column containing edge targets.
     - edge_type: The name of the column containing edge types.
-    - edge_filter: Filters to apply to the edges being traversed.
-      Currently, this is specified as a dictionary containing the name
-      of the edge field to filter on and the CQL predicate to apply.
-      For example `{"foo": "IN ['a', 'b', 'c']"}`.
+    - edge_filters: Filters to apply to the edges being traversed.
     - steps: The number of steps of edges to follow from a start node.
     - session: The session to use for executing the query. If not specified,
       it will use th default cassio session.
@@ -72,7 +98,6 @@ def traverse(
     session = check_resolve_session(session)
     keyspace = check_resolve_keyspace(keyspace)
 
-    # TODO: Entity extraction from query
     visited = set()
     pending = set()
 
@@ -90,21 +115,14 @@ def traverse(
         discovered = set()
 
         for nodes in batched(pending, 20):
-            nodes = ", ".join([f"'{node}'" for node in nodes])
-
-            predicates = [f"{edge_source} IN ({nodes})"]
-            predicates.extend([f"{field} {predicate}" for field, predicate in edge_filter.items()])
-
-            query = f"""
-                SELECT {edge_source} AS source, {edge_target} AS target, {edge_type} AS type
-                FROM {edge_table}
-                WHERE {" AND ".join(predicates)}
-            """
-
-            relations = session.execute(query)
-
-            # Can't do this yet -- the `nodes` list isn't valid in this context (only valid in vector or list).
-            # relations = session.execute("SELECT source, target, type FROM relationships WHERE source IN (%(nodes)s)", {"nodes": nodes})
+            query = _query_string(
+                n_sources=len(nodes),
+                edge_table=edge_table,
+                edge_source=edge_source,
+                edge_target=edge_target,
+                edge_type=edge_type,
+                predicates=edge_filters)
+            relations = session.execute(query, nodes)
 
             for relation in relations:
                 results.add(Relation(source=relation.source, target=relation.target, type=relation.type))
@@ -121,7 +139,7 @@ async def atraverse(
     edge_source: str = "source",
     edge_target: str = "target",
     edge_type: str = "type",
-    edge_filter: Dict[str, Any] = {},
+    edge_filters: Sequence[str] = [],
     steps: int = 3,
     session: Optional[Session] = None,
     keyspace: Optional[str] = None,
@@ -135,7 +153,7 @@ async def atraverse(
     - edge_source: The name of the column containing edge sources.
     - edge_target: The name of the column containing edge targets.
     - edge_type: The name of the column containing edge types.
-    - edge_filter: Filters to apply to the edges being traversed.
+    - edge_filters: Filters to apply to the edges being traversed.
       Currently, this is specified as a dictionary containing the name
       of the edge field to filter on and the CQL predicate to apply.
       For example `{"foo": "IN ['a', 'b', 'c']"}`.
