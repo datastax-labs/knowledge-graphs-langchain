@@ -1,8 +1,8 @@
 import asyncio
-from typing import Optional, Sequence, NamedTuple, Iterable
+from typing import Iterable, NamedTuple, Optional, Sequence
 
-from cassandra.cluster import Session, ResponseFuture
-from cassio.config import check_resolve_session, check_resolve_keyspace
+from cassandra.cluster import ResponseFuture, Session
+from cassio.config import check_resolve_keyspace, check_resolve_session
 
 from .utils import batched
 
@@ -206,9 +206,7 @@ async def atraverse(
         pending = [tg.create_task(fetch_relations(1, start).next())]
 
         while pending:
-            done, pending = await asyncio.wait(
-                pending, return_when=asyncio.FIRST_COMPLETED
-            )
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
             for future in done:
                 depth, relations, more = future.result()
                 for relation in relations:
@@ -233,9 +231,7 @@ async def atraverse(
 
                     for target_batch in batched(to_visit, max_elements_per_batch):
                         pending.add(
-                            tg.create_task(
-                                fetch_relations(depth + 1, target_batch).next()
-                            )
+                            tg.create_task(fetch_relations(depth + 1, target_batch).next())
                         )
 
     return results

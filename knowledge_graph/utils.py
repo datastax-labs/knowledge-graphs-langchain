@@ -3,7 +3,7 @@ try:
     from itertools import batched
 except ImportError:
     from itertools import islice
-    from typing import Iterable, TypeVar, Iterator
+    from typing import Iterable, Iterator, TypeVar
 
     # Fallback implementation for older Python versions
 

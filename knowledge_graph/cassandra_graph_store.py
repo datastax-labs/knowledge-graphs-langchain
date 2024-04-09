@@ -1,25 +1,34 @@
-from typing import Any, Dict, List, Optional, Tuple, Iterator
-from langchain_community.graphs.graph_store import GraphStore
-from langchain_community.graphs.graph_document import GraphDocument
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from langchain_core.runnables import Runnable, RunnableLambda
-
+from cassandra.cluster import Session
 from cassandra.query import BatchStatement, PreparedStatement
-import cassio
-from cassio.config import check_resolve_session, check_resolve_keyspace
+from cassio.config import check_resolve_keyspace, check_resolve_session
+from langchain_community.graphs.graph_document import GraphDocument
+from langchain_community.graphs.graph_store import GraphStore
+from langchain_core.runnables import Runnable, RunnableLambda
 
 from .traverse import atraverse, traverse
 from .utils import batched
 
 
 class CassandraGraphStore(GraphStore):
-    def __init__(self,
-                 node_table: str = "entities",
-                 edge_table: str = "relationships",
-                 keyspace: Optional[str] = None) -> None:
-        cassio.init(auto=True)
-        self._session = check_resolve_session()
-        keyspace = keyspace or check_resolve_keyspace()
+    def __init__(
+        self,
+        node_table: str = "entities",
+        edge_table: str = "relationships",
+        session: Optional[Session] = None,
+        keyspace: Optional[str] = None,
+    ) -> None:
+        """
+        Create a Cassandra Graph Store.
+
+        Before calling this, you must initialize cassio with `cassio.init`, or
+        provide valid session and keyspace values.
+        """
+        session = check_resolve_session(session)
+        keyspace = check_resolve_keyspace(keyspace)
+
+        self._session = session
         self._keyspace = keyspace
 
         self._node_table = node_table
