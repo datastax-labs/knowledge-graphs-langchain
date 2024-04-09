@@ -38,7 +38,7 @@ def _query_string(
         f"WHERE {edge_source} IN ({sources})",
     ]
     if predicates:
-        lines.extend(map(lambda predicate: f"AND {predicate}"))
+        lines.extend(map(lambda predicate: f"AND {predicate}", predicates))
     return " ".join(lines)
 
 
