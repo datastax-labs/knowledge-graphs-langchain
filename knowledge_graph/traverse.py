@@ -1,61 +1,75 @@
 import asyncio
+import threading
 from typing import Iterable, NamedTuple, Optional, Sequence
 
-from cassandra.cluster import ResponseFuture, Session
+from cassandra.cluster import PreparedStatement, ResponseFuture, Session
 from cassio.config import check_resolve_keyspace, check_resolve_session
 
-from .utils import batched
+
+class Node(NamedTuple):
+    name: str
+    type: str
+
+    def __repr__(self):
+        return f"{self.name}({self.type})"
 
 
 class Relation(NamedTuple):
-    source: str
-    target: str
+    source: Node
+    target: Node
     type: str
 
     def __repr__(self):
         return f"{self.source} -> {self.target}: {self.type}"
 
 
-def _query_string(
-    sources: Sequence[str],
+def _parse_relation(row) -> Relation:
+    return Relation(
+        source=Node(name=row.source_name, type=row.source_type),
+        target=Node(name=row.target_name, type=row.target_type),
+        type=row.type,
+    )
+
+
+def _prepare_edge_query(
     edge_table: str,
-    edge_source: str,
-    edge_target: str,
+    edge_source_name: str,
+    edge_source_type: str,
+    edge_target_name: str,
+    edge_target_type: str,
     edge_type: str,
-    predicates: Sequence[str],
-) -> str:
-    """Return the query string for the given number of sources.
-
-    Ideally, this would be something like `source IN %s` and we wouldn't need to
-    expand it for each length, but currently that produces an error since it
-    doesn't want to accept a list in that context. Instead, we need to unroll it
-    to `source IN (%s, %s, ...)` for the number of arguments.
-    """
-    sources = ", ".join([f"'{n}'" for n in sources])
-    lines = [
-        f"SELECT {edge_source} AS source, {edge_target} AS target, {edge_type} AS type",
-        f"FROM {edge_table}",
-        f"WHERE {edge_source} IN ({sources})",
-    ]
-    if predicates:
-        lines.extend(map(lambda predicate: f"AND {predicate}", predicates))
-    return " ".join(lines)
-
-
-DEFAULT_MAX_ELEMENTS_PER_BATCH = 50
+    edge_filters: Sequence[str],
+    session: Session,
+    keyspace: str,
+) -> PreparedStatement:
+    """Return the query for the edges from a given source."""
+    query = f"""
+        SELECT
+            {edge_source_name} AS source_name,
+            {edge_source_type} AS source_type,
+            {edge_target_name} AS target_name,
+            {edge_target_type} AS target_type,
+            {edge_type} AS type
+        FROM {keyspace}.{edge_table}
+        WHERE {edge_source_name} = ?
+        AND {edge_source_type} = ?"""
+    if edge_filters:
+        query = "\n        AND ".join([query] + edge_filters)
+    return session.prepare(query)
 
 
 def traverse(
-    start: str | Sequence[str],
+    start: Node | Sequence[Node],
     edge_table: str,
-    edge_source: str = "source",
-    edge_target: str = "target",
-    edge_type: str = "type",
+    edge_source_name: str = "source_name",
+    edge_source_type: str = "source_type",
+    edge_target_name: str = "target_name",
+    edge_target_type: str = "target_type",
+    edge_type: str = "edge_type",
     edge_filters: Sequence[str] = (),
     steps: int = 3,
     session: Optional[Session] = None,
     keyspace: Optional[str] = None,
-    max_elements_per_batch: int = DEFAULT_MAX_ELEMENTS_PER_BATCH,
 ) -> Iterable[Relation]:
     """
     Traverse the graph from the given starting nodes and return the resulting sub-graph.
@@ -63,8 +77,10 @@ def traverse(
     Parameters:
     - start: The starting node or nodes.
     - edge_table: The table containing the edges.
-    - edge_source: The name of the column containing edge sources.
-    - edge_target: The name of the column containing edge targets.
+    - edge_source_name: The name of the column containing edge source names.
+    - edge_source_type: The name of the column containing edge source types.
+    - edge_target_name: The name of the column containing edge target names.
+    - edge_target_type: The name of the column containing edge target types.
     - edge_type: The name of the column containing edge types.
     - edge_filters: Filters to apply to the edges being traversed.
     - steps: The number of steps of edges to follow from a start node.
@@ -79,47 +95,84 @@ def traverse(
     session = check_resolve_session(session)
     keyspace = check_resolve_keyspace(keyspace)
 
-    visited = set()
     pending = set()
-
-    if isinstance(start, str):
-        pending.update([start])
-    else:
-        pending.update(start)
-
+    distances = {}
     results = set()
+    query = _prepare_edge_query(
+        edge_table=edge_table,
+        edge_source_name=edge_source_name,
+        edge_source_type=edge_source_type,
+        edge_target_name=edge_target_name,
+        edge_target_type=edge_target_type,
+        edge_type=edge_type,
+        edge_filters=edge_filters,
+        session=session,
+        keyspace=keyspace,
+    )
 
-    for _ in range(steps):
-        if not pending:
-            break
+    condition = threading.Condition()
+    error = None
 
-        discovered = set()
+    def handle_result(rows, source_distance: int, request: ResponseFuture):
+        relations = map(_parse_relation, rows)
+        with condition:
+            if source_distance < steps:
+                for r in relations:
+                    results.add(r)
+                    fetch_relationships(source_distance + 1, r.target)
+            else:
+                results.update(relations)
 
-        for nodes in batched(pending, max_elements_per_batch):
-            query = _query_string(
-                sources=nodes,
-                edge_table=edge_table,
-                edge_source=edge_source,
-                edge_target=edge_target,
-                edge_type=edge_type,
-                predicates=edge_filters,
+        if request.has_more_pages:
+            request.start_fetching_next_page()
+        else:
+            with condition:
+                if request._req_id in pending:
+                    pending.remove(request._req_id)
+                if len(pending) == 0:
+                    condition.notify()
+
+    def handle_error(e):
+        nonlocal error
+        with condition:
+            error = e
+            condition.notify()
+
+    def fetch_relationships(distance: int, source: Node) -> None:
+        """
+        Fetch relationships from node `source` is found at `distance`.
+
+        This will retrieve the edges from `source`, and visit the resulting
+        nodes at distance `distance + 1`.
+        """
+        with condition:
+            old_distance = distances.get(source)
+            if old_distance is not None and old_distance <= distance:
+                # Already discovered at that distance.
+                return
+
+            distances[source] = distance
+
+            request: ResponseFuture = session.execute_async(query, (source.name, source.type))
+            pending.add(request._req_id)
+            request.add_callbacks(
+                handle_result,
+                handle_error,
+                callback_kwargs={"source_distance": distance, "request": request},
             )
-            relations = session.execute(query)
 
-            for relation in relations:
-                results.add(
-                    Relation(
-                        source=relation.source,
-                        target=relation.target,
-                        type=relation.type,
-                    )
-                )
-                discovered.add(relation.target)
+    with condition:
+        if isinstance(start, Node):
+            start = [start]
+        for source in start:
+            fetch_relationships(1, source)
 
-        visited.update(pending)
-        pending = discovered.difference(visited)
+        condition.wait()
 
-    return results
+        if error is not None:
+            raise error
+        else:
+            return results
 
 
 class AsyncPagedQuery(object):
@@ -137,7 +190,7 @@ class AsyncPagedQuery(object):
         self.loop.call_soon_threadsafe(self.current_page_future.set_exception, error)
 
     async def next(self):
-        page = await self.current_page_future
+        page = [_parse_relation(r) for r in await self.current_page_future]
 
         if self.response_future.has_more_pages:
             self.current_page_future = asyncio.Future()
@@ -148,16 +201,17 @@ class AsyncPagedQuery(object):
 
 
 async def atraverse(
-    start: str | Sequence[str],
+    start: Node | Sequence[Node],
     edge_table: str,
-    edge_source: str = "source",
-    edge_target: str = "target",
-    edge_type: str = "type",
+    edge_source_name: str = "source_name",
+    edge_source_type: str = "source_type",
+    edge_target_name: str = "target_name",
+    edge_target_type: str = "target_type",
+    edge_type: str = "edge_type",
     edge_filters: Sequence[str] = [],
     steps: int = 3,
     session: Optional[Session] = None,
     keyspace: Optional[str] = None,
-    max_elements_per_batch: int = DEFAULT_MAX_ELEMENTS_PER_BATCH,
 ) -> Iterable[Relation]:
     """
     Async traversal of the graph from the given starting nodes and return the resulting sub-graph.
@@ -165,8 +219,10 @@ async def atraverse(
     Parameters:
     - start: The starting node or nodes.
     - edge_table: The table containing the edges.
-    - edge_source: The name of the column containing edge sources.
-    - edge_target: The name of the column containing edge targets.
+    - edge_source_name: The name of the column containing edge source names.
+    - edge_source_type: The name of the column containing edge source types.
+    - edge_target_name: The name of the column containing edge target names.
+    - edge_target_type: The name of the column containing edge target types.
     - edge_type: The name of the column containing edge types.
     - edge_filters: Filters to apply to the edges being traversed.
       Currently, this is specified as a dictionary containing the name
@@ -185,25 +241,37 @@ async def atraverse(
     session = check_resolve_session(session)
     keyspace = check_resolve_keyspace(keyspace)
 
-    def fetch_relations(depth: int, sources: Sequence[str]) -> AsyncPagedQuery:
-        query = _query_string(
-            sources=sources,
-            edge_table=edge_table,
-            edge_source=edge_source,
-            edge_target=edge_target,
-            edge_type=edge_type,
-            predicates=edge_filters,
-        )
+    # Prepare the query.
+    #
+    # We reprepare this for each traversal since each call may have different
+    # filters.
+    #
+    # TODO: We should cache this at least for the common case of no-filters.
+    query = _prepare_edge_query(
+        edge_table=edge_table,
+        edge_source_name=edge_source_name,
+        edge_source_type=edge_source_type,
+        edge_target_name=edge_target_name,
+        edge_target_type=edge_target_type,
+        edge_type=edge_type,
+        edge_filters=edge_filters,
+        session=session,
+        keyspace=keyspace,
+    )
 
-        return AsyncPagedQuery(depth, session.execute_async(query))
+    def fetch_relation(tg: asyncio.TaskGroup, depth: int, source: Node) -> AsyncPagedQuery:
+        paged_query = AsyncPagedQuery(
+            depth, session.execute_async(query, (source.name, source.type))
+        )
+        return tg.create_task(paged_query.next())
 
     results = set()
     async with asyncio.TaskGroup() as tg:
-        if isinstance(start, str):
+        if isinstance(start, Node):
             start = [start]
 
         discovered = {t: 0 for t in start}
-        pending = [tg.create_task(fetch_relations(1, start).next())]
+        pending = {fetch_relation(tg, 1, source) for source in start}
 
         while pending:
             done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
@@ -229,9 +297,7 @@ async def atraverse(
                             discovered[r.target] = depth
                             to_visit.add(r.target)
 
-                    for target_batch in batched(to_visit, max_elements_per_batch):
-                        pending.add(
-                            tg.create_task(fetch_relations(depth + 1, target_batch).next())
-                        )
+                    for source in to_visit:
+                        pending.add(fetch_relation(tg, depth + 1, source))
 
     return results
