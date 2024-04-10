@@ -69,8 +69,8 @@ class DataFixture:
         self.graph_store.add_graph_documents(documents)
 
     def drop(self):
-        self.session.execute(f"DROP TABLE IF EXISTS {self.keyspace}.{self.node_table};")
-        self.session.execute(f"DROP TABLE IF EXISTS {self.keyspace}.{self.edge_table};")
+        self.session.execute(f"DROP TABLE IF EXISTS {self.node_table};")
+        self.session.execute(f"DROP TABLE IF EXISTS {self.edge_table};")
 
 
 @pytest.fixture(scope="session")
