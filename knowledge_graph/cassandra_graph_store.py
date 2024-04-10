@@ -34,34 +34,50 @@ class CassandraGraphStore(GraphStore):
         self._node_table = node_table
         self._edge_table = edge_table
 
-        self._session.set_keyspace(keyspace)
+        # Partition by `name` and cluster by `type`.
+        # Each `(name, type)` pair is a unique node.
+        # We can enumerate all `type` values for a given `name` to identify ambiguous terms.
         self._session.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {node_table} (
-                id TEXT,
+            CREATE TABLE IF NOT EXISTS {keyspace}.{node_table} (
+                name TEXT,
                 type TEXT,
-                PRIMARY KEY (id, type)
+                PRIMARY KEY (name, type)
             );
             """
         )
 
         self._session.execute(
             f"""
-            CREATE TABLE IF NOT EXISTS {edge_table} (
-                source TEXT,
-                target TEXT,
-                type TEXT,
-                PRIMARY KEY (source, target, type)
+            CREATE TABLE IF NOT EXISTS {keyspace}.{edge_table} (
+                source_name TEXT,
+                source_type TEXT,
+                target_name TEXT,
+                target_type TEXT,
+                edge_type TEXT,
+                PRIMARY KEY ((source_name, source_type), target_name, target_type, edge_type)
             );
+            """
+        )
+
+        self._session.execute(
+            f"""
+            CREATE CUSTOM INDEX {edge_table}_type_index
+            ON {keyspace}.{edge_table} (edge_type)
+            USING 'StorageAttachedIndex';
             """
         )
 
         self._insert_node = self._session.prepare(
-            f"INSERT INTO {node_table} (id, type) VALUES (?, ?)"
+            f"INSERT INTO {keyspace}.{node_table} (name, type) VALUES (?, ?)"
         )
 
         self._insert_relationship = self._session.prepare(
-            f"INSERT INTO {edge_table} (source, target, type) VALUES (?, ?, ?)"
+            f"""
+            INSERT INTO {keyspace}.{edge_table} (
+                source_name, source_type, target_name, target_type, edge_type
+            ) VALUES (?, ?, ?, ?, ?)
+            """
         )
 
     def add_graph_documents(
@@ -86,7 +102,7 @@ class CassandraGraphStore(GraphStore):
             for edge in graph_document.relationships:
                 yield (
                     self._insert_relationship,
-                    (edge.source.id, edge.target.id, edge.type),
+                    (edge.source.id, edge.source.type, edge.target.id, edge.target.type, edge.type),
                 )
 
     # TODO: should this include the types of each node?
