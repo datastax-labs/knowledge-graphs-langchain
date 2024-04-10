@@ -5,6 +5,7 @@ import pytest
 from cassandra.cluster import Cluster, Session
 from langchain.graphs.graph_document import GraphDocument, Node, Relationship
 from langchain_core.documents import Document
+from langchain_core.language_models import BaseChatModel
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
 
@@ -16,7 +17,7 @@ def db_keyspace() -> str:
     return "default_keyspace"
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def cassandra_port(db_keyspace: str) -> Iterator[int]:
     # TODO: Allow running against local Cassandra and/or Astra using pytest option.
     cassandra = DockerContainer("cassandra:5")
@@ -52,6 +53,17 @@ def db_session(cassandra_port: int) -> Session:
     return cluster.connect()
 
 
+@pytest.fixture(scope="session")
+def llm() -> BaseChatModel:
+    try:
+        from langchain_openai import ChatOpenAI
+
+        model = ChatOpenAI(model_name="gpt-4")
+        return model
+    except ValueError:
+        pytest.skip("Unable to create OpenAI model")
+
+
 class DataFixture:
     def __init__(self, session: Session, keyspace: str, documents: List[GraphDocument]) -> None:
         self.session = session
@@ -69,8 +81,8 @@ class DataFixture:
         self.graph_store.add_graph_documents(documents)
 
     def drop(self):
-        self.session.execute(f"DROP TABLE IF EXISTS {self.node_table};")
-        self.session.execute(f"DROP TABLE IF EXISTS {self.edge_table};")
+        self.session.execute(f"DROP TABLE IF EXISTS {self.keyspace}.{self.node_table};")
+        self.session.execute(f"DROP TABLE IF EXISTS {self.keyspace}.{self.edge_table};")
 
 
 @pytest.fixture(scope="session")
