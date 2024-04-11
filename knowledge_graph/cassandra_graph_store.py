@@ -62,7 +62,7 @@ class CassandraGraphStore(GraphStore):
 
         self._session.execute(
             f"""
-            CREATE CUSTOM INDEX {edge_table}_type_index
+            CREATE CUSTOM INDEX IF NOT EXISTS {edge_table}_type_index
             ON {keyspace}.{edge_table} (edge_type)
             USING 'StorageAttachedIndex';
             """

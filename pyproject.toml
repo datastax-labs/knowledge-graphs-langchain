@@ -13,6 +13,7 @@ langchain-community = "^0.0.31"
 langchain-openai = "^0.1.1"
 langchain-experimental = "^0.0.56"
 cassio = "^0.1.5"
+graphviz = "^0.20.3"
 
 
 [tool.poetry.group.dev.dependencies]

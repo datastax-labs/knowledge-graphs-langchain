@@ -9,10 +9,10 @@ from langchain_experimental.graph_transformers.llm import optional_enum_field
 
 from .traverse import Node
 
-QUERY_KEYWORD_EXTRACT_PROMPT = (
+QUERY_ENTITY_EXTRACT_PROMPT = (
     "A question is provided below. Given the question, extract up to 5 "
-    "keywords from the text. Focus on extracting the keywords that we can use "
-    "to best lookup answers to the question. Avoid stopwords.\n"
+    "entities (name and type) from the text. Focus on extracting the entities "
+    " that we can use to best lookup answers to the question. Avoid stopwords.\n"
     "---------------------\n"
     "{question}\n"
     "---------------------\n"
@@ -22,7 +22,7 @@ QUERY_KEYWORD_EXTRACT_PROMPT = (
 
 def extract_entities(
     llm: BaseChatModel,
-    keyword_extraction_prompt: str = QUERY_KEYWORD_EXTRACT_PROMPT,
+    keyword_extraction_prompt: str = QUERY_ENTITY_EXTRACT_PROMPT,
     node_types: Optional[List[str]] = None,
 ) -> Runnable:
     """
