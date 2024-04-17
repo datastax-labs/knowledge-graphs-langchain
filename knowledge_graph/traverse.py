@@ -92,6 +92,9 @@ def traverse(
     Returns:
     An iterable over relations in the traversed sub-graph.
     """
+    if len(start) == 0:
+        return []
+
     session = check_resolve_session(session)
     keyspace = check_resolve_keyspace(keyspace)
 
