@@ -7,7 +7,7 @@ readme = "README.md"
 packages = [{include = "knowledge_graph"}]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.10"
 langchain = "^0.1.14"
 langchain-community = "^0.0.31"
 langchain-openai = "^0.1.1"
@@ -33,7 +33,7 @@ build-backend = "poetry.core.masonry.api"
 line-length = 98
 
 # Assume Python 3.11.
-target-version = "py311"
+target-version = "py310"
 
 [tool.ruff.lint]
 # Enable Pyflakes `E` and `F` codes by default.
