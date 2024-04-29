@@ -1,16 +1,23 @@
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
 
 from cassandra.cluster import Session
-from cassandra.query import BatchStatement, PreparedStatement
-from cassio.config import check_resolve_keyspace, check_resolve_session
 from langchain_community.graphs.graph_document import GraphDocument
+from langchain_community.graphs.graph_document import Node as LangChainNode
 from langchain_community.graphs.graph_store import GraphStore
 from langchain_core.runnables import Runnable, RunnableLambda
 
-from .traverse import atraverse, traverse
-from .utils import batched
+from knowledge_graph.knowledge_graph import CassandraKnowledgeGraph
 
+from .traverse import Node, Relation
 
+def _elements(documents: Iterable[GraphDocument]) -> Iterable[Union[Node, Relation]]:
+    def _node(node: LangChainNode) -> Node:
+        return Node(name=str(node.id), type=node.type)
+    for document in documents:
+        for node in document.nodes:
+            yield _node(node)
+        for edge in document.relationships:
+            yield Relation(source=_node(edge.source), target=_node(edge.target), type=edge.type)
 class CassandraGraphStore(GraphStore):
     def __init__(
         self,
@@ -25,97 +32,24 @@ class CassandraGraphStore(GraphStore):
         Before calling this, you must initialize cassio with `cassio.init`, or
         provide valid session and keyspace values.
         """
-        session = check_resolve_session(session)
-        keyspace = check_resolve_keyspace(keyspace)
-
-        self._session = session
-        self._keyspace = keyspace
-
-        self._node_table = node_table
-        self._edge_table = edge_table
-
-        # Partition by `name` and cluster by `type`.
-        # Each `(name, type)` pair is a unique node.
-        # We can enumerate all `type` values for a given `name` to identify ambiguous terms.
-        self._session.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {keyspace}.{node_table} (
-                name TEXT,
-                type TEXT,
-                PRIMARY KEY (name, type)
-            );
-            """
-        )
-
-        self._session.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {keyspace}.{edge_table} (
-                source_name TEXT,
-                source_type TEXT,
-                target_name TEXT,
-                target_type TEXT,
-                edge_type TEXT,
-                PRIMARY KEY ((source_name, source_type), target_name, target_type, edge_type)
-            );
-            """
-        )
-
-        self._session.execute(
-            f"""
-            CREATE CUSTOM INDEX IF NOT EXISTS {edge_table}_type_index
-            ON {keyspace}.{edge_table} (edge_type)
-            USING 'StorageAttachedIndex';
-            """
-        )
-
-        self._insert_node = self._session.prepare(
-            f"INSERT INTO {keyspace}.{node_table} (name, type) VALUES (?, ?)"
-        )
-
-        self._insert_relationship = self._session.prepare(
-            f"""
-            INSERT INTO {keyspace}.{edge_table} (
-                source_name, source_type, target_name, target_type, edge_type
-            ) VALUES (?, ?, ?, ?, ?)
-            """
+        self._graph = CassandraKnowledgeGraph(
+            node_table = node_table,
+            edge_table = edge_table,
+            session = session,
+            keyspace = keyspace,
         )
 
     def add_graph_documents(
         self, graph_documents: List[GraphDocument], include_source: bool = False
     ) -> None:
-        insertions = self._insertions(graph_documents, include_source)
-
-        for batch in batched(insertions, n=50):
-            batch_statement = BatchStatement()
-            for statement, args in batch:
-                batch_statement.add(statement, args)
-            self._session.execute(batch_statement)
-
-    def _insertions(
-        self, graph_documents: List[GraphDocument], include_source: bool = False
-    ) -> Iterator[Tuple[PreparedStatement, Any]]:
-        for graph_document in graph_documents:
-            # TODO: if `include_source = True`, include entry connecting the
-            # nodes we add to the `graph_document.source`.
-            for node in graph_document.nodes:
-                yield (self._insert_node, (node.id, node.type))
-            for edge in graph_document.relationships:
-                yield (
-                    self._insert_relationship,
-                    (
-                        edge.source.id,
-                        edge.source.type,
-                        edge.target.id,
-                        edge.target.type,
-                        edge.type,
-                    ),
-                )
+        # TODO: Include source.
+        self._graph.insert(
+            _elements(graph_documents)
+        )
 
     # TODO: should this include the types of each node?
     def query(self, query: str, params: dict = {}) -> List[Dict[str, Any]]:
-        steps = params.get("steps", 3)
-
-        return self.as_runnable(steps=steps).invoke(query)
+        raise ValueError(f"Querying Cassandra should use `as_runnable`.")
 
     def as_runnable(self, steps: int = 3, edge_filters: Sequence[str] = []) -> Runnable:
         """
@@ -125,10 +59,7 @@ class CassandraGraphStore(GraphStore):
         - steps: The maximum distance to follow from the starting points.
         - edge_filters: Predicates to use for filtering the edges.
         """
-        return RunnableLambda(func=traverse, afunc=atraverse).bind(
-            edge_table=self._edge_table,
+        return RunnableLambda(func=self._graph.traverse, afunc=self._graph.atraverse).bind(
             steps=steps,
-            session=self._session,
-            keyspace=self._keyspace,
             edge_filters=edge_filters,
         )
