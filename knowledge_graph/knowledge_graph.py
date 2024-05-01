@@ -4,17 +4,18 @@ from cassandra.cluster import Session
 from cassandra.query import BatchStatement
 from cassio.config import check_resolve_keyspace, check_resolve_session
 
-from .traverse import Node, Relation, traverse, atraverse
+from .traverse import Node, Relation, atraverse, traverse
 from .utils import batched
+
 
 class CassandraKnowledgeGraph:
     def __init__(
-            self,
-            node_table: str = "entities",
-            edge_table: str = "relationships",
-            session: Optional[Session] = None,
-            keyspace: Optional[str] = None,
-            apply_schema: bool = True,
+        self,
+        node_table: str = "entities",
+        edge_table: str = "relationships",
+        session: Optional[Session] = None,
+        keyspace: Optional[str] = None,
+        apply_schema: bool = True,
     ) -> None:
         """
         Create a Cassandra Knowledge Graph.
@@ -106,8 +107,8 @@ class CassandraKnowledgeGraph:
                             element.source.type,
                             element.target.name,
                             element.target.type,
-                            element.type
-                        )
+                            element.type,
+                        ),
                     )
                 else:
                     raise ValueError(f"Unsupported element type: {element}")
@@ -133,17 +134,17 @@ class CassandraKnowledgeGraph:
         An iterable over relations in the traversed sub-graph.
         """
         return traverse(
-            start = start,
-            edge_table = self._edge_table,
-            edge_source_name = "source_name",
-            edge_source_type = "source_type",
-            edge_target_name = "target_name",
-            edge_target_type = "target_type",
-            edge_type = "edge_type",
-            edge_filters = edge_filters,
-            steps = steps,
-            session = self._session,
-            keyspace = self._keyspace,
+            start=start,
+            edge_table=self._edge_table,
+            edge_source_name="source_name",
+            edge_source_type="source_type",
+            edge_target_name="target_name",
+            edge_target_type="target_type",
+            edge_type="edge_type",
+            edge_filters=edge_filters,
+            steps=steps,
+            session=self._session,
+            keyspace=self._keyspace,
         )
 
     async def atraverse(
@@ -164,15 +165,15 @@ class CassandraKnowledgeGraph:
         An iterable over relations in the traversed sub-graph.
         """
         return await atraverse(
-            start = start,
-            edge_table = self._edge_table,
-            edge_source_name = "source_name",
-            edge_source_type = "source_type",
-            edge_target_name = "target_name",
-            edge_target_type = "target_type",
-            edge_type = "edge_type",
-            edge_filters = edge_filters,
-            steps = steps,
-            session = self._session,
-            keyspace = self._keyspace,
+            start=start,
+            edge_table=self._edge_table,
+            edge_source_name="source_name",
+            edge_source_type="source_type",
+            edge_target_name="target_name",
+            edge_target_type="target_type",
+            edge_type="edge_type",
+            edge_filters=edge_filters,
+            steps=steps,
+            session=self._session,
+            keyspace=self._keyspace,
         )
