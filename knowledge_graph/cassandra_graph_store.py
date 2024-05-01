@@ -1,4 +1,4 @@
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
 
 from cassandra.cluster import Session
 from langchain_community.graphs.graph_document import GraphDocument
@@ -10,14 +10,18 @@ from knowledge_graph.knowledge_graph import CassandraKnowledgeGraph
 
 from .traverse import Node, Relation
 
+
 def _elements(documents: Iterable[GraphDocument]) -> Iterable[Union[Node, Relation]]:
     def _node(node: LangChainNode) -> Node:
         return Node(name=str(node.id), type=node.type)
+
     for document in documents:
         for node in document.nodes:
             yield _node(node)
         for edge in document.relationships:
             yield Relation(source=_node(edge.source), target=_node(edge.target), type=edge.type)
+
+
 class CassandraGraphStore(GraphStore):
     def __init__(
         self,
@@ -33,23 +37,21 @@ class CassandraGraphStore(GraphStore):
         provide valid session and keyspace values.
         """
         self._graph = CassandraKnowledgeGraph(
-            node_table = node_table,
-            edge_table = edge_table,
-            session = session,
-            keyspace = keyspace,
+            node_table=node_table,
+            edge_table=edge_table,
+            session=session,
+            keyspace=keyspace,
         )
 
     def add_graph_documents(
         self, graph_documents: List[GraphDocument], include_source: bool = False
     ) -> None:
         # TODO: Include source.
-        self._graph.insert(
-            _elements(graph_documents)
-        )
+        self._graph.insert(_elements(graph_documents))
 
     # TODO: should this include the types of each node?
     def query(self, query: str, params: dict = {}) -> List[Dict[str, Any]]:
-        raise ValueError(f"Querying Cassandra should use `as_runnable`.")
+        raise ValueError("Querying Cassandra should use `as_runnable`.")
 
     def as_runnable(self, steps: int = 3, edge_filters: Sequence[str] = []) -> Runnable:
         """

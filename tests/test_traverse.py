@@ -4,6 +4,7 @@ from knowledge_graph.traverse import Node, Relation, atraverse, traverse
 
 from .conftest import DataFixture
 
+
 def test_traverse_empty(marie_curie: DataFixture) -> None:
     results = traverse(
         start=[],
@@ -13,6 +14,7 @@ def test_traverse_empty(marie_curie: DataFixture) -> None:
         keyspace=marie_curie.keyspace,
     )
     assert_that(results, contains_exactly())
+
 
 def test_traverse_marie_curie(marie_curie: DataFixture) -> None:
     results = traverse(
@@ -57,6 +59,7 @@ def test_traverse_marie_curie(marie_curie: DataFixture) -> None:
     expected.add(Relation(Node("Pierre Curie", "Person"), Node("Nobel Prize", "Award"), "WON"))
     assert_that(results, contains_exactly(*expected))
 
+
 async def test_atraverse_empty(marie_curie: DataFixture) -> None:
     results = await atraverse(
         start=[],
@@ -66,6 +69,7 @@ async def test_atraverse_empty(marie_curie: DataFixture) -> None:
         keyspace=marie_curie.keyspace,
     )
     assert_that(results, contains_exactly())
+
 
 async def test_atraverse_marie_curie(marie_curie: DataFixture) -> None:
     results = await atraverse(

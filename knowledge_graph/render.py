@@ -1,22 +1,28 @@
 from typing import Iterable, Union
+
 import graphviz
 from langchain_community.graphs.graph_document import GraphDocument, Node
+
 
 def _node_label(node: Node) -> str:
     return f"{node.id} [{node.type}]"
 
+
 def print_graph_documents(graph_documents: Union[GraphDocument, Iterable[GraphDocument]]):
-  if isinstance(graph_documents, GraphDocument):
-     graph_documents = [graph_documents]
+    if isinstance(graph_documents, GraphDocument):
+        graph_documents = [graph_documents]
 
-  for doc in graph_documents:
-    for relation in doc.relationships:
-        source = relation.source
-        target = relation.target
-        type = relation.type
-        print(f"{_node_label(source)} -> {_node_label(target)}: {type}")
+    for doc in graph_documents:
+        for relation in doc.relationships:
+            source = relation.source
+            target = relation.target
+            type = relation.type
+            print(f"{_node_label(source)} -> {_node_label(target)}: {type}")
 
-def render_graph_documents(graph_documents: Union[GraphDocument, Iterable[GraphDocument]]) -> graphviz.Digraph:
+
+def render_graph_documents(
+    graph_documents: Union[GraphDocument, Iterable[GraphDocument]],
+) -> graphviz.Digraph:
     if isinstance(graph_documents, GraphDocument):
         graph_documents = [GraphDocument]
 
@@ -31,7 +37,7 @@ def render_graph_documents(graph_documents: Union[GraphDocument, Iterable[GraphD
         else:
             node_id = f"{len(nodes)}"
             nodes[node_key] = node_id
-            dot.node(node_id, label = _node_label(node))
+            dot.node(node_id, label=_node_label(node))
             return node_id
 
     for graph_document in graph_documents:
