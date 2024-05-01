@@ -20,6 +20,7 @@ QUERY_ENTITY_EXTRACT_PROMPT = (
 )
 
 
+# TODO: Use a knowledge schema when extracting entities, to get the right kinds of nodes.
 def extract_entities(
     llm: BaseChatModel,
     keyword_extraction_prompt: str = QUERY_ENTITY_EXTRACT_PROMPT,

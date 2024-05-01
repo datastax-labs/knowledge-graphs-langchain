@@ -5,6 +5,10 @@ description = ""
 authors = ["Ben Chambers <35960+bjchambers@users.noreply.github.com>"]
 readme = "README.md"
 packages = [{include = "knowledge_graph"}]
+include = [
+    { path = "knowledge_graph/prompt_templates/*.md", format = ["sdist", "wheel"] }
+]
+
 
 [tool.poetry.dependencies]
 python = "^3.10"
