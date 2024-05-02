@@ -26,7 +26,7 @@ For instance, a knowledge schema with the node type "person" would allow the kno
 Avoid more specific terms node types like "mathematician" or "scientist".
 
 Distinct kinds of entities or concepts should have distinct node types.
-For example, nationalities should be represented as a distinct "nationality" onde type rather than a "person" or "award".
+For example, nationalities should be represented as a distinct "nationality" node type rather than a "person" or "award".
 
 ## 3. Relationship Types
 
@@ -44,6 +44,10 @@ For example, nodes of type "person" should not be valid targets of a relationshi
 
 If an edge is symmetric, it should be noted in the description.
 For example, a relationship representing marriage should be symmetric.
+
+For non-symmetric edges, the direction should be from more specific to more general.
+This makes it easier to start with questions about a specific concept (a person or place) and locate information about that concept.
+For example, relationships involving a person should generally start at the person and target various information about that person.
 
 ## 4. Strict Compliance
 Adhere to the rules strictly. Non-compliance will result in termination.

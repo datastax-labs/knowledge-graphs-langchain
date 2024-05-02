@@ -1,13 +1,7 @@
-import pytest
-from langchain_community.graphs.graph_document import Node, Relationship
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel
 from precisely import assert_that, contains_exactly
 
-from knowledge_graph.extraction import (
-    KnowledgeSchema,
-)
-from knowledge_graph.knowledge_schema import NodeSchema
 from knowledge_graph.schema_inference import KnowledgeSchemaInferer
 
 
@@ -30,8 +24,11 @@ def test_schema_inference(llm: BaseChatModel):
     results = schema_inferer.infer_schemas_from([Document(page_content=MARIE_CURIE_SOURCE)])[0]
 
     print(results.to_yaml_str())
-    assert_that(map(lambda n: n.type, results.nodes), contains_exactly(
-        "person", "institution", "award", "nationality",
+    assert_that([n.type for n in results.nodes], contains_exactly(
+        "person", "institution", "award", "nationality", "field"
+    ))
+    assert_that([r.edge_type for r in results.relationships], contains_exactly(
+        "won", "is_nationality_of", "works_at", "is_field_of"
     ))
 
     # We don't do more testing here since this is meant to attempt to infer things.
