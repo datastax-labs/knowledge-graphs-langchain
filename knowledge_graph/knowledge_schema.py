@@ -1,4 +1,5 @@
-from typing import Dict, List, Sequence
+from pathlib import Path
+from typing import Dict, List, Self, Sequence, Union
 
 from langchain_community.graphs.graph_document import GraphDocument
 from langchain_core.pydantic_v1 import BaseModel
@@ -54,8 +55,21 @@ class KnowledgeSchema(BaseModel):
     relationships: List[RelationshipSchema]
     """Allowed relationships for the knowledge schema."""
 
-    examples: List[Example] = []
-    """Example extractions."""
+    @classmethod
+    def from_file(cls, path: Union[str, Path]) -> Self:
+        """Load a KnowledgeSchema from a JSON or YAML file.
+
+        Parameters:
+        - path: The path to the file to load.
+        """
+        from pydantic_yaml import parse_yaml_file_as
+
+        return parse_yaml_file_as(cls, path)
+
+    def to_yaml_str(self) -> str:
+        from pydantic_yaml import to_yaml_str
+
+        return to_yaml_str(self, default_flow_style=True)
 
 
 class KnowledgeSchemaValidator:

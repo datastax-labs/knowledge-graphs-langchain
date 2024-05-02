@@ -32,10 +32,6 @@ Adhere to the rules strictly. Non-compliance will result in termination.
 
 Use the following knowledge schema when extracting information for the knowledge graph.
 
-### Node Types
-
-{node_types}
-
-### Relationship Patterns
-
-{relationship_patterns}
+```yaml
+{knowledge_schema_yaml}
+```

@@ -1,3 +1,5 @@
+from os import path
+
 import pytest
 from langchain_community.graphs.graph_document import Node, Relationship
 from langchain_core.documents import Document
@@ -7,74 +9,17 @@ from precisely import assert_that, contains_exactly
 from knowledge_graph.extraction import (
     KnowledgeSchema,
     KnowledgeSchemaExtractor,
-    NodeSchema,
-    RelationshipSchema,
-)
-
-TEST_KNOWLEDGE_SCHEMA = KnowledgeSchema(
-    nodes=[
-        NodeSchema(
-            type="Institution", description="An institution, such as a business or university."
-        ),
-        NodeSchema(type="Award", description="An award, such as the Nobel Prize or an Oscar."),
-        NodeSchema(type="Person", description="A person."),
-        NodeSchema(
-            type="OCCUPATION", description="An occupation which a person held, such as Biologist or Chemist."
-        ),
-        NodeSchema(
-            type="Nationality",
-            description="A nationality associated with people of a given country.",
-        ),
-    ],
-    relationships=[
-        RelationshipSchema(
-            edge_type="HAS_OCCUPATION",
-            source_types=["Person"],
-            target_types=["Occupation"],
-            description="The source person had the target occupation.",
-        ),
-        RelationshipSchema(
-            edge_type="STUDIED_AT",
-            source_types=["Person"],
-            target_types=["Institution"],
-            description="The source person studied at the target institution.",
-        ),
-        RelationshipSchema(
-            edge_type="WORKED_AT",
-            source_types=["Person"],
-            target_types=["Institution"],
-            description="The source person worked at the target institution.",
-        ),
-        RelationshipSchema(
-            edge_type="RECEIVED",
-            source_types=["Person"],
-            target_types=["Award"],
-            description="The source person received the target award.",
-        ),
-        RelationshipSchema(
-            edge_type="HAS_NATIONALITY",
-            source_types=["Person"],
-            target_types=["Nationality"],
-            description="The source person has the target nationality.",
-        ),
-        RelationshipSchema(
-            edge_type="MARRIED_TO",
-            source_types=["Person"],
-            target_types=["Person"],
-            description=(
-                "The source is married to the target."
-                "Marriage is symmetric so the reverse relationship should also exist."
-            ),
-        ),
-    ],
 )
 
 
 @pytest.fixture(scope="session")
 def extractor(llm: BaseChatModel) -> KnowledgeSchemaExtractor:
+    schema = KnowledgeSchema.from_file(
+        path.join(path.dirname(__file__), "marie_curie_schema.yaml")
+    )
     return KnowledgeSchemaExtractor(
         llm=llm,
-        schema=TEST_KNOWLEDGE_SCHEMA,
+        schema=schema,
     )
 
 
