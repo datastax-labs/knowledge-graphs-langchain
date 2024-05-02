@@ -27,7 +27,7 @@ from knowledge_graph.templates import load_template
 def _format_example(idx: int, example: Example) -> str:
     from pydantic_yaml import to_yaml_str
 
-    return f"Example {idx}:\n```yaml\n{to_yaml_str(example, default_flow_style=True)}\n```"
+    return f"Example {idx}:\n```yaml\n{to_yaml_str(example)}\n```"
 
 
 class KnowledgeSchemaExtractor:
