@@ -19,7 +19,7 @@ TEST_KNOWLEDGE_SCHEMA = KnowledgeSchema(
         NodeSchema(type="Award", description="An award, such as the Nobel Prize or an Oscar."),
         NodeSchema(type="Person", description="A person."),
         NodeSchema(
-            type="Discipline", description="An area of study, such as Biology or Chemistry."
+            type="OCCUPATION", description="An occupation which a person held, such as Biologist or Chemist."
         ),
         NodeSchema(
             type="Nationality",
@@ -28,10 +28,10 @@ TEST_KNOWLEDGE_SCHEMA = KnowledgeSchema(
     ],
     relationships=[
         RelationshipSchema(
-            edge_type="STUDIED",
+            edge_type="HAS_OCCUPATION",
             source_types=["Person"],
-            target_types=["Discipline"],
-            description="The source person studied the target discipline.",
+            target_types=["Occupation"],
+            description="The source person had the target occupation.",
         ),
         RelationshipSchema(
             edge_type="STUDIED_AT",
@@ -96,8 +96,8 @@ def test_extraction(extractor: KnowledgeSchemaExtractor):
     marie_curie = Node(id="Marie Curie", type="Person")
     polish = Node(id="Polish", type="Nationality")
     french = Node(id="French", type="Nationality")
-    physicist = Node(id="Physicist", type="Discipline")
-    chemist = Node(id="Chemist", type="Discipline")
+    physicist = Node(id="Physicist", type="Occupation")
+    chemist = Node(id="Chemist", type="Occupation")
     nobel_prize = Node(id="Nobel Prize", type="Award")
     pierre_curie = Node(id="Pierre Curie", type="Person")
 
@@ -123,8 +123,8 @@ def test_extraction(extractor: KnowledgeSchemaExtractor):
         contains_exactly(
             Relationship(source=marie_curie, target=polish, type="HAS_NATIONALITY"),
             Relationship(source=marie_curie, target=french, type="HAS_NATIONALITY"),
-            Relationship(source=marie_curie, target=physicist, type="STUDIED"),
-            Relationship(source=marie_curie, target=chemist, type="STUDIED"),
+            Relationship(source=marie_curie, target=physicist, type="HAS_OCCUPATION"),
+            Relationship(source=marie_curie, target=chemist, type="HAS_OCCUPATION"),
             Relationship(source=marie_curie, target=nobel_prize, type="RECEIVED"),
             Relationship(source=pierre_curie, target=nobel_prize, type="RECEIVED"),
             Relationship(source=marie_curie, target=university_of_paris, type="WORKED_AT"),
