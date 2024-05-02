@@ -1,5 +1,5 @@
 from os import path
-from typing import Dict, List, Union, cast
+from typing import Dict, List, Sequence, Union, cast
 
 from langchain_community.graphs.graph_document import GraphDocument
 from langchain_core.documents import Document
@@ -22,63 +22,37 @@ from knowledge_graph.knowledge_schema import (
     Example,
     KnowledgeSchema,
     KnowledgeSchemaValidator,
-    NodeSchema,
-    RelationshipSchema,
 )
-from knowledge_graph.traverse import Node
 
 TEMPLATE_PATH = path.join(path.dirname(__file__), "prompt_templates")
 
 
 def _format_example(idx: int, example: Example) -> str:
-    lines = [
-        f"Example {idx} Input: {example.input}\n" f"Example {idx} Nodes: ",
-    ]
-
-    def f_node(node: Node) -> str:
-        return f"{{ name: {node.name}, type: {node.type} }}"
-
-    lines.extend([f"- {f_node(node)}" for node in example.nodes])
-    lines.append(f"Example {idx} Edges: ")
-    lines.extend(
-        [
-            f"- {{ source: {f_node(e.source)}, target: {f_node(e.target)}, type: {e.type} }}"
-            for e in example.edges
-        ]
-    )
-    return "\n".join(lines)
+    from pydantic_yaml import to_yaml_str
+    return f"Example {idx}:\n```yaml\n{to_yaml_str(example, default_flow_style=True)}\n```"
 
 
-def _extraction_prompt(schema: KnowledgeSchema) -> SystemMessagePromptTemplate:
-    def fmt_node(node: NodeSchema) -> str:
-        return f"- Node type {node.type}: {node.description}"
-
-    def fmt_relationship(rel: RelationshipSchema) -> str:
-        return (
-            f"- Edge type {rel.edge_type}: {rel.description}\n"
-            f"  Source node types: {rel.source_types}\n"
-            f"  Target node types: {rel.target_types}\n"
-        )
-
-    node_types = "\n".join(map(fmt_node, schema.nodes))
-    relationship_patterns = "\n".join(map(fmt_relationship, schema.relationships))
-
+def _extraction_prompt(knowledge_schema: KnowledgeSchema) -> SystemMessagePromptTemplate:
+    knowledge_schema_yaml = knowledge_schema.to_yaml_str()
     return SystemMessagePromptTemplate(
         prompt=PromptTemplate.from_file(path.join(TEMPLATE_PATH, "extraction.md")).partial(
-            node_types=node_types, relationship_patterns=relationship_patterns
+            knowledge_schema_yaml = knowledge_schema_yaml
         )
     )
 
 
 class KnowledgeSchemaExtractor:
-    def __init__(self, llm: BaseChatModel, schema: KnowledgeSchema, strict: bool = False) -> None:
+    def __init__(self, llm: BaseChatModel,
+                 schema: KnowledgeSchema,
+                 examples: Sequence[Example] = [],
+                 strict: bool = False) -> None:
         self._validator = KnowledgeSchemaValidator(schema)
         self.strict = strict
 
         messages = [_extraction_prompt(schema)]
 
-        if schema.examples:
-            formatted = "\n\n".join(map(_format_example, schema.examples))
+        if examples:
+            formatted = "\n\n".join(map(_format_example, examples))
             messages.append(SystemMessagePromptTemplate(prompt=formatted))
 
         messages.append(HumanMessagePromptTemplate.from_template("Input: {input}"))
