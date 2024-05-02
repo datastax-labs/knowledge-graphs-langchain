@@ -69,7 +69,7 @@ class KnowledgeSchema(BaseModel):
     def to_yaml_str(self) -> str:
         from pydantic_yaml import to_yaml_str
 
-        return to_yaml_str(self, default_flow_style=True)
+        return to_yaml_str(self)
 
 
 class KnowledgeSchemaValidator:
