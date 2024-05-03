@@ -28,6 +28,9 @@ Avoid more specific terms node types like "mathematician" or "scientist".
 Distinct kinds of entities or concepts should have distinct node types.
 For example, nationalities should be represented as a distinct "nationality" node type rather than a "person" or "award".
 
+Every node schema should be part of at least one relationship.
+Node which can't be connected to the rest of the graph aren't useful.
+
 ## 3. Relationship Types
 
 Edges represent relationships in the knowledge graph.
