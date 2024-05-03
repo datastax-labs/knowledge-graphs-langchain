@@ -49,10 +49,10 @@ class Example(BaseModel):
 
 
 class KnowledgeSchema(BaseModel):
-    nodes: List[NodeSchema]
+    nodes: List[NodeSchema] = []
     """Allowed node types for the knowledge schema."""
 
-    relationships: List[RelationshipSchema]
+    relationships: List[RelationshipSchema] = []
     """Allowed relationships for the knowledge schema."""
 
     @classmethod
