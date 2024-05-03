@@ -3,6 +3,8 @@ from typing import Iterable, Union
 import graphviz
 from langchain_community.graphs.graph_document import GraphDocument, Node
 
+from knowledge_graph.knowledge_schema import KnowledgeSchema
+
 
 def _node_label(node: Node) -> str:
     return f"{node.id} [{node.type}]"
@@ -45,5 +47,20 @@ def render_graph_documents(
             _node_id(node)
         for r in graph_document.relationships:
             dot.edge(_node_id(r.source), _node_id(r.target), r.type)
+
+    return dot
+
+def render_knowledge_schema(knowledge_schema: KnowledgeSchema) -> graphviz.Digraph:
+    dot = graphviz.Digraph()
+
+    for node in knowledge_schema.nodes:
+        dot.node(node.type, tooltip=node.description)
+
+    for r in knowledge_schema.relationships:
+        for source in r.source_types:
+            for target in r.target_types:
+                dot.edge(source, target,
+                         label = r.edge_type,
+                         tooltip=r.description)
 
     return dot

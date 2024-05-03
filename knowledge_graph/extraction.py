@@ -1,4 +1,3 @@
-from os import path
 from typing import Dict, List, Sequence, Union, cast
 
 from langchain_community.graphs.graph_document import GraphDocument
@@ -7,7 +6,6 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import (
     ChatPromptTemplate,
     HumanMessagePromptTemplate,
-    PromptTemplate,
     SystemMessagePromptTemplate,
 )
 from langchain_core.pydantic_v1 import BaseModel
@@ -23,33 +21,27 @@ from knowledge_graph.knowledge_schema import (
     KnowledgeSchema,
     KnowledgeSchemaValidator,
 )
-
-TEMPLATE_PATH = path.join(path.dirname(__file__), "prompt_templates")
+from knowledge_graph.templates import load_template
 
 
 def _format_example(idx: int, example: Example) -> str:
     from pydantic_yaml import to_yaml_str
-    return f"Example {idx}:\n```yaml\n{to_yaml_str(example, default_flow_style=True)}\n```"
 
-
-def _extraction_prompt(knowledge_schema: KnowledgeSchema) -> SystemMessagePromptTemplate:
-    knowledge_schema_yaml = knowledge_schema.to_yaml_str()
-    return SystemMessagePromptTemplate(
-        prompt=PromptTemplate.from_file(path.join(TEMPLATE_PATH, "extraction.md")).partial(
-            knowledge_schema_yaml = knowledge_schema_yaml
-        )
-    )
+    return f"Example {idx}:\n```yaml\n{to_yaml_str(example)}\n```"
 
 
 class KnowledgeSchemaExtractor:
-    def __init__(self, llm: BaseChatModel,
-                 schema: KnowledgeSchema,
-                 examples: Sequence[Example] = [],
-                 strict: bool = False) -> None:
+    def __init__(
+        self,
+        llm: BaseChatModel,
+        schema: KnowledgeSchema,
+        examples: Sequence[Example] = [],
+        strict: bool = False,
+    ) -> None:
         self._validator = KnowledgeSchemaValidator(schema)
         self.strict = strict
 
-        messages = [_extraction_prompt(schema)]
+        messages = [SystemMessagePromptTemplate(prompt = load_template("extraction.md", knowledge_schema_yaml=schema.to_yaml_str()))]
 
         if examples:
             formatted = "\n\n".join(map(_format_example, examples))
@@ -62,6 +54,7 @@ class KnowledgeSchemaExtractor:
             node_labels=[node.type for node in schema.nodes],
             rel_types=list({r.edge_type for r in schema.relationships}),
         )
+        # TODO: Use "full" output so we can detect parsing errors?
         structured_llm = llm.with_structured_output(schema)
         self._chain = prompt | structured_llm
 
