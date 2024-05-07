@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from typing import Iterable, NamedTuple, Optional, Sequence
+from typing import Any, Iterable, NamedTuple, Optional, Sequence, Dict
 
 from cassandra.cluster import PreparedStatement, ResponseFuture, Session
 from cassio.config import check_resolve_keyspace, check_resolve_session
@@ -9,9 +9,19 @@ from cassio.config import check_resolve_keyspace, check_resolve_session
 class Node(NamedTuple):
     name: str
     type: str
+    properties: Dict[str, Any] = {}
 
     def __repr__(self):
         return f"{self.name}({self.type})"
+
+    def __hash__(self):
+        return hash(self.name) * hash(self.type)
+
+    def __eq__(self, value) -> bool:
+        if not isinstance(value, Node):
+            return False
+
+        return self.name == value.name and self.type == value.type
 
 
 class Relation(NamedTuple):

@@ -1,12 +1,25 @@
-from typing import Iterable, Optional, Sequence, Union
+import json
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union, cast
 
-from cassandra.cluster import Session
+from cassandra.cluster import Session, ResponseFuture
 from cassandra.query import BatchStatement
 from cassio.config import check_resolve_keyspace, check_resolve_session
 
 from .traverse import Node, Relation, atraverse, traverse
 from .utils import batched
 
+def _serialize_md_dict(md_dict: Dict[str, Any]) -> str:
+    return json.dumps(md_dict, separators=(",", ":"), sort_keys=True)
+
+def _deserialize_md_dict(md_string: str) -> Dict[str, Any]:
+    return cast(Dict[str, Any], json.loads(md_string))
+
+def _parse_node(row) -> Node:
+    return Node(
+        name = row.name,
+        type = row.type,
+        properties = _deserialize_md_dict(row.properties_json) if row.properties_json else dict(),
+    )
 
 class CassandraKnowledgeGraph:
     def __init__(
@@ -43,7 +56,7 @@ class CassandraKnowledgeGraph:
             self._apply_schema()
 
         self._insert_node = self._session.prepare(
-            f"INSERT INTO {keyspace}.{node_table} (name, type) VALUES (?, ?)"
+            f"INSERT INTO {keyspace}.{node_table} (name, type, properties_json) VALUES (?, ?, ?)"
         )
 
         self._insert_relationship = self._session.prepare(
@@ -51,6 +64,14 @@ class CassandraKnowledgeGraph:
             INSERT INTO {keyspace}.{edge_table} (
                 source_name, source_type, target_name, target_type, edge_type
             ) VALUES (?, ?, ?, ?, ?)
+            """
+        )
+
+        self._query_relationship = self._session.prepare(
+            f"""
+            SELECT name, type, properties_json
+            FROM {keyspace}.{node_table}
+            WHERE name = ? AND type = ?
             """
         )
 
@@ -63,6 +84,7 @@ class CassandraKnowledgeGraph:
             CREATE TABLE IF NOT EXISTS {self._keyspace}.{self._node_table} (
                 name TEXT,
                 type TEXT,
+                properties_json TEXT,
                 PRIMARY KEY (name, type)
             );
             """
@@ -98,7 +120,8 @@ class CassandraKnowledgeGraph:
             batch_statement = BatchStatement()
             for element in batch:
                 if isinstance(element, Node):
-                    batch_statement.add(self._insert_node, (element.name, element.type))
+                    properties_json = _serialize_md_dict(element.properties)
+                    batch_statement.add(self._insert_node, (element.name, element.type, properties_json))
                 elif isinstance(element, Relation):
                     batch_statement.add(
                         self._insert_relationship,
@@ -115,6 +138,32 @@ class CassandraKnowledgeGraph:
 
             # TODO: Support concurrent execution of these statements.
             self._session.execute(batch_statement)
+
+    def subgraph(
+            self,
+            start: Node | Sequence[Node],
+            edge_filters: Sequence[str] = (),
+            steps: int = 3,
+    ) -> Tuple[Iterable[Node], Iterable[Relation]]:
+        """
+        Retrieve the sub-graph from the given starting nodes.
+        """
+        edges = self.traverse(start, edge_filters, steps)
+
+        # Create the set of nodes.
+        nodes = { n for e in edges for n in (e.source, e.target) }
+
+        # Retrieve the set of nodes to get the properties.
+
+        # TODO: We really should have a NodeKey separate from Node. Otherwise, we end
+        # up in a state where two nodes can be the "same" but with different properties,
+        # etc.
+
+        node_futures: Iterable[ResponseFuture] = [ self._session.execute_async(self._query_relationship, (n.name, n.type)) for n in nodes ]
+
+        nodes = [ _parse_node(n) for future in node_futures for n in future.result() ]
+
+        return (nodes, edges)
 
     def traverse(
         self,
