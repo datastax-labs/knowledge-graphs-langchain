@@ -36,7 +36,7 @@ class CassandraGraphStore(GraphStore):
         Before calling this, you must initialize cassio with `cassio.init`, or
         provide valid session and keyspace values.
         """
-        self._graph = CassandraKnowledgeGraph(
+        self.graph = CassandraKnowledgeGraph(
             node_table=node_table,
             edge_table=edge_table,
             session=session,
@@ -47,7 +47,7 @@ class CassandraGraphStore(GraphStore):
         self, graph_documents: List[GraphDocument], include_source: bool = False
     ) -> None:
         # TODO: Include source.
-        self._graph.insert(_elements(graph_documents))
+        self.graph.insert(_elements(graph_documents))
 
     # TODO: should this include the types of each node?
     def query(self, query: str, params: dict = {}) -> List[Dict[str, Any]]:
@@ -61,7 +61,7 @@ class CassandraGraphStore(GraphStore):
         - steps: The maximum distance to follow from the starting points.
         - edge_filters: Predicates to use for filtering the edges.
         """
-        return RunnableLambda(func=self._graph.traverse, afunc=self._graph.atraverse).bind(
+        return RunnableLambda(func=self.graph.traverse, afunc=self.graph.atraverse).bind(
             steps=steps,
             edge_filters=edge_filters,
         )

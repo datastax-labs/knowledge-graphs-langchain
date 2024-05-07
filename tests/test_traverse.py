@@ -59,7 +59,6 @@ def test_traverse_marie_curie(marie_curie: DataFixture) -> None:
     expected.add(Relation(Node("Pierre Curie", "Person"), Node("Nobel Prize", "Award"), "WON"))
     assert_that(results, contains_exactly(*expected))
 
-
 async def test_atraverse_empty(marie_curie: DataFixture) -> None:
     results = await atraverse(
         start=[],
