@@ -12,7 +12,7 @@ class Node(NamedTuple):
     properties: Dict[str, Any] = {}
 
     def __repr__(self):
-        return f"{self.name}({self.type})"
+        return f"{self.name} ({self.type})"
 
     def __hash__(self):
         return hash(self.name) * hash(self.type)
