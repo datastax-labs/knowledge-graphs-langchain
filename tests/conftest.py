@@ -71,9 +71,20 @@ class DataFixture:
         self.uid = secrets.token_hex(8)
         self.node_table = f"entities_{self.uid}"
         self.edge_table = f"relationships_{self.uid}"
+
+        text_embeddings = None
+        try:
+            from langchain_openai import OpenAIEmbeddings
+
+            text_embeddings = OpenAIEmbeddings()
+        except ValueError:
+            print("OpenAI not configured. Not embedding data.")
+        self.has_embeddings = text_embeddings is not None
+
         self.graph_store = CassandraGraphStore(
             node_table=self.node_table,
             edge_table=self.edge_table,
+            text_embeddings=text_embeddings,
             session=session,
             keyspace=keyspace,
         )

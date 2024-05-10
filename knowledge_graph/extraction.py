@@ -41,7 +41,11 @@ class KnowledgeSchemaExtractor:
         self._validator = KnowledgeSchemaValidator(schema)
         self.strict = strict
 
-        messages = [SystemMessagePromptTemplate(prompt = load_template("extraction.md", knowledge_schema_yaml=schema.to_yaml_str()))]
+        messages = [
+            SystemMessagePromptTemplate(
+                prompt=load_template("extraction.md", knowledge_schema_yaml=schema.to_yaml_str())
+            )
+        ]
 
         if examples:
             formatted = "\n\n".join(map(_format_example, examples))

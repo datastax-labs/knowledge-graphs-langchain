@@ -50,6 +50,7 @@ def render_graph_documents(
 
     return dot
 
+
 def render_knowledge_schema(knowledge_schema: KnowledgeSchema) -> graphviz.Digraph:
     dot = graphviz.Digraph()
 
@@ -59,8 +60,6 @@ def render_knowledge_schema(knowledge_schema: KnowledgeSchema) -> graphviz.Digra
     for r in knowledge_schema.relationships:
         for source in r.source_types:
             for target in r.target_types:
-                dot.edge(source, target,
-                         label = r.edge_type,
-                         tooltip=r.description)
+                dot.edge(source, target, label=r.edge_type, tooltip=r.description)
 
     return dot

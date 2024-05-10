@@ -4,6 +4,7 @@ from cassandra.cluster import Session
 from langchain_community.graphs.graph_document import GraphDocument
 from langchain_community.graphs.graph_document import Node as LangChainNode
 from langchain_community.graphs.graph_store import GraphStore
+from langchain_core.embeddings import Embeddings
 from langchain_core.runnables import Runnable, RunnableLambda
 
 from knowledge_graph.knowledge_graph import CassandraKnowledgeGraph
@@ -27,6 +28,7 @@ class CassandraGraphStore(GraphStore):
         self,
         node_table: str = "entities",
         edge_table: str = "relationships",
+        text_embeddings: Optional[Embeddings] = None,
         session: Optional[Session] = None,
         keyspace: Optional[str] = None,
     ) -> None:
@@ -39,6 +41,7 @@ class CassandraGraphStore(GraphStore):
         self.graph = CassandraKnowledgeGraph(
             node_table=node_table,
             edge_table=edge_table,
+            text_embeddings=text_embeddings,
             session=session,
             keyspace=keyspace,
         )
