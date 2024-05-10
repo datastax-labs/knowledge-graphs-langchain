@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from typing import Any, Iterable, NamedTuple, Optional, Sequence, Dict
+from typing import Any, Dict, Iterable, NamedTuple, Optional, Sequence
 
 from cassandra.cluster import PreparedStatement, ResponseFuture, Session
 from cassio.config import check_resolve_keyspace, check_resolve_session

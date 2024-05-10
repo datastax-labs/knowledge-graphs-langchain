@@ -1,31 +1,38 @@
+from itertools import repeat
 import json
 from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union, cast
 
-from cassandra.cluster import Session, ResponseFuture
+from cassandra.cluster import ResponseFuture, Session
 from cassandra.query import BatchStatement
 from cassio.config import check_resolve_keyspace, check_resolve_session
+from langchain_core.embeddings import Embeddings
 
 from .traverse import Node, Relation, atraverse, traverse
 from .utils import batched
 
+
 def _serialize_md_dict(md_dict: Dict[str, Any]) -> str:
     return json.dumps(md_dict, separators=(",", ":"), sort_keys=True)
+
 
 def _deserialize_md_dict(md_string: str) -> Dict[str, Any]:
     return cast(Dict[str, Any], json.loads(md_string))
 
+
 def _parse_node(row) -> Node:
     return Node(
-        name = row.name,
-        type = row.type,
-        properties = _deserialize_md_dict(row.properties_json) if row.properties_json else dict(),
+        name=row.name,
+        type=row.type,
+        properties=_deserialize_md_dict(row.properties_json) if row.properties_json else dict(),
     )
+
 
 class CassandraKnowledgeGraph:
     def __init__(
         self,
         node_table: str = "entities",
         edge_table: str = "relationships",
+        text_embeddings: Optional[Embeddings] = None,
         session: Optional[Session] = None,
         keyspace: Optional[str] = None,
         apply_schema: bool = True,
@@ -36,6 +43,7 @@ class CassandraKnowledgeGraph:
         Parameters:
         - node_table: Name of the table containing nodes. Defaults to `"entities"`.
         - edge_table: Name of the table containing edges. Defaults to `"relationships"`.
+        _ text_embeddings: Name of the embeddings to use, if any.
         - session: The Cassandra `Session` to use. If not specified, uses the default `cassio`
           session, which requires `cassio.init` has been called.
         - keyspace: The Cassandra keyspace to use. If not specified, uses the default `cassio`
@@ -45,6 +53,11 @@ class CassandraKnowledgeGraph:
 
         session = check_resolve_session(session)
         keyspace = check_resolve_keyspace(keyspace)
+
+        self._text_embeddings = text_embeddings
+        self._text_embeddings_dim = (
+            len(text_embeddings.embed_query("test string")) if text_embeddings else 0
+        )
 
         self._session = session
         self._keyspace = keyspace
@@ -56,7 +69,10 @@ class CassandraKnowledgeGraph:
             self._apply_schema()
 
         self._insert_node = self._session.prepare(
-            f"INSERT INTO {keyspace}.{node_table} (name, type, properties_json) VALUES (?, ?, ?)"
+            f"""INSERT INTO {keyspace}.{node_table} (
+                    name, type, text_embedding, properties_json
+                ) VALUES (?, ?, ?, ?)
+            """
         )
 
         self._insert_relationship = self._session.prepare(
@@ -75,6 +91,15 @@ class CassandraKnowledgeGraph:
             """
         )
 
+        self._query_nodes_by_embedding = self._session.prepare(
+            f"""
+            SELECT name, type, properties_json
+            FROM {keyspace}.{node_table}
+            ORDER BY text_embedding ANN OF ?
+            LIMIT ?
+            """
+        )
+
     def _apply_schema(self):
         # Partition by `name` and cluster by `type`.
         # Each `(name, type)` pair is a unique node.
@@ -85,6 +110,7 @@ class CassandraKnowledgeGraph:
                 name TEXT,
                 type TEXT,
                 properties_json TEXT,
+                text_embedding VECTOR<FLOAT, {self._text_embeddings_dim}>,
                 PRIMARY KEY (name, type)
             );
             """
@@ -105,23 +131,68 @@ class CassandraKnowledgeGraph:
 
         self._session.execute(
             f"""
+            CREATE CUSTOM INDEX IF NOT EXISTS {self._node_table}_text_embedding_index
+            ON {self._keyspace}.{self._node_table} (text_embedding)
+            USING 'StorageAttachedIndex';
+            """
+        )
+
+        self._session.execute(
+            f"""
             CREATE CUSTOM INDEX IF NOT EXISTS {self._edge_table}_type_index
             ON {self._keyspace}.{self._edge_table} (edge_type)
             USING 'StorageAttachedIndex';
             """
         )
 
+    def _send_query_nearest_node(self, node: str, k: int = 1) -> ResponseFuture:
+        return self._session.execute_async(
+            self._query_nodes_by_embedding,
+            (
+                self._text_embeddings.embed_query(node),
+                k,
+            ),
+        )
+
+    # TODO: Allow filtering by node predicates and/or minimum similarity.
+    def query_nearest_nodes(self, nodes: Iterable[str], k: int = 1) -> Iterable[Node]:
+        """
+        For each node, return the nearest nodes in the table.
+
+        Parameters:
+        - nodes: The strings to search for in the list of nodes.
+        - k: The number of similar nodes to retrieve for each string.
+        """
+        if self._text_embeddings is None:
+            raise ValueError("Unable to query for nearest nodes without embeddings")
+
+        node_futures: Iterable[ResponseFuture] = [
+            self._send_query_nearest_node(n, k) for n in nodes
+        ]
+
+        nodes = {_parse_node(n) for node_future in node_futures for n in node_future.result()}
+        return list(nodes)
+
     # TODO: Introduce `ainsert` for async insertions.
     def insert(
         self,
         elements: Iterable[Union[Node, Relation]],
     ) -> None:
-        for batch in batched(elements, n=50):
+        for batch in batched(elements, n=1):
+            text_embeddings = iter(
+                self._text_embeddings.embed_documents(
+                    [f"{n.name} {n.type}" for n in batch if isinstance(n, Node)]
+                )
+            ) if self._text_embeddings else repeat([])
+
             batch_statement = BatchStatement()
             for element in batch:
                 if isinstance(element, Node):
                     properties_json = _serialize_md_dict(element.properties)
-                    batch_statement.add(self._insert_node, (element.name, element.type, properties_json))
+                    batch_statement.add(
+                        self._insert_node,
+                        (element.name, element.type, next(text_embeddings), properties_json),
+                    )
                 elif isinstance(element, Relation):
                     batch_statement.add(
                         self._insert_relationship,
@@ -140,10 +211,10 @@ class CassandraKnowledgeGraph:
             self._session.execute(batch_statement)
 
     def subgraph(
-            self,
-            start: Node | Sequence[Node],
-            edge_filters: Sequence[str] = (),
-            steps: int = 3,
+        self,
+        start: Node | Sequence[Node],
+        edge_filters: Sequence[str] = (),
+        steps: int = 3,
     ) -> Tuple[Iterable[Node], Iterable[Relation]]:
         """
         Retrieve the sub-graph from the given starting nodes.
@@ -151,7 +222,7 @@ class CassandraKnowledgeGraph:
         edges = self.traverse(start, edge_filters, steps)
 
         # Create the set of nodes.
-        nodes = { n for e in edges for n in (e.source, e.target) }
+        nodes = {n for e in edges for n in (e.source, e.target)}
 
         # Retrieve the set of nodes to get the properties.
 
@@ -159,9 +230,11 @@ class CassandraKnowledgeGraph:
         # up in a state where two nodes can be the "same" but with different properties,
         # etc.
 
-        node_futures: Iterable[ResponseFuture] = [ self._session.execute_async(self._query_relationship, (n.name, n.type)) for n in nodes ]
+        node_futures: Iterable[ResponseFuture] = [
+            self._session.execute_async(self._query_relationship, (n.name, n.type)) for n in nodes
+        ]
 
-        nodes = [ _parse_node(n) for future in node_futures for n in future.result() ]
+        nodes = [_parse_node(n) for future in node_futures for n in future.result()]
 
         return (nodes, edges)
 
