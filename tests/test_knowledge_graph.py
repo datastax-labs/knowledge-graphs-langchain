@@ -59,3 +59,10 @@ def test_fuzzy_search(marie_curie: DataFixture) -> None:
         Node(name="Polish", type="Nationality", properties={"European": True}),
     ]
     assert_that(result_nodes, contains_exactly(*expected_nodes))
+
+    result_nodes = marie_curie.graph_store.graph.query_nearest_nodes(["European"], k=2)
+    expected_nodes = [
+        Node(name="Polish", type="Nationality", properties={"European": True}),
+        Node(name="French", type="Nationality", properties={"European": True}),
+    ]
+    assert_that(result_nodes, contains_exactly(*expected_nodes))

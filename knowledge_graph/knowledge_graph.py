@@ -1,5 +1,5 @@
-from itertools import repeat
 import json
+from itertools import repeat
 from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union, cast
 
 from cassandra.cluster import ResponseFuture, Session
@@ -178,12 +178,17 @@ class CassandraKnowledgeGraph:
         self,
         elements: Iterable[Union[Node, Relation]],
     ) -> None:
-        for batch in batched(elements, n=1):
-            text_embeddings = iter(
-                self._text_embeddings.embed_documents(
-                    [f"{n.name} {n.type}" for n in batch if isinstance(n, Node)]
+        for batch in batched(elements, n=4):
+            from yaml import dump
+            text_embeddings = (
+                iter(
+                    self._text_embeddings.embed_documents(
+                        [dump(n) for n in batch if isinstance(n, Node)]
+                    )
                 )
-            ) if self._text_embeddings else repeat([])
+                if self._text_embeddings
+                else repeat([])
+            )
 
             batch_statement = BatchStatement()
             for element in batch:
