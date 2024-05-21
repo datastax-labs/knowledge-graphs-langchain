@@ -1,10 +1,26 @@
+import secrets
 import pytest
 from precisely import assert_that, contains_exactly
 
+from cassandra.cluster import Session
+from knowledge_graph.knowledge_graph import CassandraKnowledgeGraph
 from knowledge_graph.traverse import Node, Relation
 
 from .conftest import DataFixture
 
+def test_no_embeddings(db_session: Session, db_keyspace: str) -> None:
+    uid = secrets.token_hex(8)
+    node_table = f"entities_{uid}"
+    edge_table = f"relationships_{uid}"
+
+    graph = CassandraKnowledgeGraph(
+        node_table=node_table,
+        edge_table=edge_table,
+        text_embeddings=None,
+        session=db_session,
+        keyspace=db_keyspace,
+    )
+    graph.insert([Node(name="a", type="b")])
 
 def test_traverse_marie_curie(marie_curie: DataFixture) -> None:
     (result_nodes, result_edges) = marie_curie.graph_store.graph.subgraph(

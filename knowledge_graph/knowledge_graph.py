@@ -56,7 +56,11 @@ class CassandraKnowledgeGraph:
 
         self._text_embeddings = text_embeddings
         self._text_embeddings_dim = (
-            len(text_embeddings.embed_query("test string")) if text_embeddings else 0
+            # Embedding vectors must have dimension:
+            #  > 0 to be created at all.
+            #  > 1 to support cosine distance.
+            # So we default to 2.
+            len(text_embeddings.embed_query("test string")) if text_embeddings else 2
         )
 
         self._session = session
@@ -187,7 +191,7 @@ class CassandraKnowledgeGraph:
                     )
                 )
                 if self._text_embeddings
-                else repeat([])
+                else repeat([0.0, 1.0])
             )
 
             batch_statement = BatchStatement()
